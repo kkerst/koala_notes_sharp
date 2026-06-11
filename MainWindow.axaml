@@ -15,16 +15,17 @@
                     <TextBlock Grid.Column="0" Text="KOALA_NOTES" VerticalAlignment="Center" FontWeight="Bold" Foreground="#7c6bff" Margin="0,0,16,0" FontSize="14" LetterSpacing="0.06"/>
 
                     <ComboBox Grid.Column="1" Name="PageNavigationDropdown" SelectionChanged="OnPageNavigationChanged" SelectedIndex="0" Width="200" VerticalAlignment="Center" Background="#21262d" BorderBrush="#30363d" Margin="0,0,8,0">
-                        <ComboBoxItem Content="Notes Workspace" Tag="notes"/>
+                        <ComboBoxItem Content="- Tool Selection -" Tag="toolselection"/>
                         <ComboBoxItem Content="Encoder Module" Tag="encoder"/>
+                        <ComboBoxItem Content="Exploit Database" Tag="exploit"/>
+                        <ComboBoxItem Content="HTTP Repeater" Tag="repeater"/>
                         <ComboBoxItem Content="IP Geolocation" Tag="ip"/>
+                        <ComboBoxItem Content="Notes Workspace" Tag="notes"/>
+                        <ComboBoxItem Content="Obfuscation Pipe" Tag="obfuscate"/>
                         <ComboBoxItem Content="OSINT Master Hub" Tag="osint"/>
                         <ComboBoxItem Content="Reverse Shells" Tag="rshells"/>
-                        <ComboBoxItem Content="Web Shells" Tag="webshells"/>
-                        <ComboBoxItem Content="Exploit Database" Tag="exploit"/>
-                        <ComboBoxItem Content="Obfuscation Pipe" Tag="obfuscate"/>
                         <ComboBoxItem Content="SQLi Payload Lab" Tag="sqli"/>
-                        <ComboBoxItem Content="HTTP Repeater" Tag="repeater"/>
+                        <ComboBoxItem Content="Web Shells" Tag="webshells"/>
                     </ComboBox>
 
                     <!-- + note button right next to the dropdown -->

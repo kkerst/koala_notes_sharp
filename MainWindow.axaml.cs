@@ -233,6 +233,8 @@ public partial class MainWindow : Window
     {
         if (PageNavigationDropdown?.SelectedItem is not ComboBoxItem item || item.Tag is not string activeTag) return;
 
+        if (activeTag == "toolselection") return;
+
         if (ViewNotesPanel    != null) ViewNotesPanel.IsVisible    = activeTag == "notes";
         if (ViewEncoderPanel  != null) ViewEncoderPanel.IsVisible  = activeTag == "encoder";
         if (ViewIpPanel       != null) ViewIpPanel.IsVisible       = activeTag == "ip";
