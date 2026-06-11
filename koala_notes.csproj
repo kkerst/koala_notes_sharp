@@ -2,6 +2,8 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>KoalaNotes</AssemblyName>
+    <RootNamespace>KoalaNotes</RootNamespace>
     <NoWarn>8600;8602</NoWarn>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -22,5 +24,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.1.3" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.1.3" />
     <PackageReference Include="Mapsui.Avalonia" Version="4.1.8" />
+    <None Remove="Assets\koala.ico" />
+    <AvaloniaResource Include="Assets\koala.ico" />
   </ItemGroup>
 </Project>

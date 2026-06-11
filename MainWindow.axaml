@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="KoalaNotes.MainWindow"
+        Icon="avares://KoalaNotes/Assets/koala.ico"
         Title="Koala Notes" Width="1200" Height="750"
         Background="#0d1117" Foreground="#e6edf3"
         FontFamily="Cascadia Code, Fira Code, Consolas, monospace"
