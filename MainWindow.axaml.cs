@@ -45,6 +45,9 @@ public partial class MainWindow : Window
     // ── Save debounce ──────────────────────────────────────────────────────
     private System.Threading.CancellationTokenSource? _saveCts;
 
+    // ── Sort debounce ──────────────────────────────────────────────────────
+    private System.Threading.CancellationTokenSource? _resortCts;
+
     // ── HTTP (IP lookup) ───────────────────────────────────────────────────
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
@@ -204,6 +207,14 @@ public partial class MainWindow : Window
                 File.WriteAllText(Path.Combine(appDir, "error_log.txt"), ex.ToString());
             }
         };
+
+        this.Closing += (sender, e) => {
+            // Stop the debounced save timer if it's running
+            _saveCts?.Cancel();
+            
+            // Force an immediate synchronous save
+            SaveDataToDisk();
+        };
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -315,7 +326,10 @@ public partial class MainWindow : Window
     {
         if (_isUpdatingUi || _selectedNote == null || NoteTitleTxt == null || NoteBodyTxt == null) return;
 
-        _selectedNote.Title = string.IsNullOrWhiteSpace(NoteTitleTxt.Text) ? "Untitled Note" : NoteTitleTxt.Text;
+        string newTitle = string.IsNullOrWhiteSpace(NoteTitleTxt.Text) ? "Untitled Note" : NoteTitleTxt.Text;
+        bool titleChanged = _selectedNote.Title != newTitle;
+
+        _selectedNote.Title = newTitle;
         _selectedNote.Body  = NoteBodyTxt.Text ?? "";
 
         if (StatusNoteTxt      != null) StatusNoteTxt.Text      = _selectedNote.Title;
@@ -325,6 +339,42 @@ public partial class MainWindow : Window
             activeNode.Header = _selectedNote.Title;
 
         DebouncedSave();
+        if (titleChanged) DebouncedResort();
+    }
+
+    private void RestoreSelectedNote(NoteItem? note)
+    {
+        if (note == null || NotesCategoryTree == null) return;
+        foreach (TreeViewItem catNode in NotesCategoryTree.Items)
+        {
+            foreach (TreeViewItem noteNode in catNode.Items)
+            {
+                if (noteNode.Tag == note)
+                {
+                    catNode.IsExpanded = true;
+                    noteNode.IsSelected = true;
+                    return;
+                }
+            }
+        }
+    }
+
+    private async void DebouncedResort()
+    {
+        _resortCts?.Cancel();
+        _resortCts = new System.Threading.CancellationTokenSource();
+        var token = _resortCts.Token;
+        try
+        {
+            await Task.Delay(500, token);
+            if (!token.IsCancellationRequested)
+            {
+                var currentNote = _selectedNote;
+                PopulateSidebarTree(SidebarSearchBox?.Text ?? "");
+                RestoreSelectedNote(currentNote);
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     private async void DebouncedSave()
