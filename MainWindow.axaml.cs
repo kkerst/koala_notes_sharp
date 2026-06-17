@@ -14,6 +14,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Platform;
 
 namespace KoalaNotes;
 
@@ -36,6 +37,15 @@ public partial class MainWindow : Window
     private string _repeaterRespBody      = "";
     private string _repeaterLastUrl       = "";
     private string _selectedPayloadTemplate = "{URL}";  
+
+    // ── GTFObins ────────────────────────────────────────────────────────────
+
+    private List<GtfoBinsEntry> _gtfoBinsData       = new();
+    private List<GtfoBinsEntry> _gtfoBinsFiltered   = new();
+    private string              _gtfoBinsTypeFilter  = "all";
+    private string              _gtfoBinsSearch      = "";
+    private bool                _gtfoBinsLoaded      = false;
+    private System.Threading.CancellationTokenSource? _searchCancellationTokenSource;
 
     // ── Drag & drop ────────────────────────────────────────────────────────
     private Point     _dragStartPoint;
@@ -256,8 +266,12 @@ public partial class MainWindow : Window
         if (ViewObfuscatePanel != null) ViewObfuscatePanel.IsVisible = activeTag == "obfuscate";
         if (ViewSqliPanel      != null) ViewSqliPanel.IsVisible      = activeTag == "sqli";
         if (ViewRepeaterPanel  != null) ViewRepeaterPanel.IsVisible  = activeTag == "repeater";
+        if (ViewGtfobinsPanel != null) ViewGtfobinsPanel.IsVisible = activeTag == "gtfobins";
 
         if (activeTag == "sqli") RefreshSqliPayloads();
+
+        if (activeTag == "gtfobins" && !_gtfoBinsLoaded)
+            _ = LoadGtfoBinsAsync();
 
         // Show/hide the + note button only on Notes tab
         if (GlobalNewNoteBtn != null) GlobalNewNoteBtn.IsVisible = activeTag == "notes";
@@ -2038,7 +2052,520 @@ public partial class MainWindow : Window
         }
         catch { }
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    // GTFOBins — data loading
+    // ══════════════════════════════════════════════════════════════════════════════
+
+    private void PopulateDynamicCategories()
+    {
+        if (_gtfoBinsData == null || _gtfoBinsData.Count == 0) return;
+
+        var uniqueCategories = new HashSet<string>();
+
+        foreach (var entry in _gtfoBinsData)
+        {
+            if (entry.Functions != null)
+            {
+                foreach (var func in entry.Functions)
+                {
+                    if (!string.IsNullOrEmpty(func.Type))
+                    {
+                        uniqueCategories.Add(func.Type);
+                    }
+                }
+            }
+        }
+
+        var categoryList = uniqueCategories.OrderBy(c => c).ToList();
+        categoryList.Insert(0, "All");
+
+        // Targets your exact styled ListBox control
+        var filterList = this.FindControl<Avalonia.Controls.ListBox>("GtfoBinsFilterList");
+        if (filterList != null)
+        {
+            filterList.ItemsSource = categoryList;
+            
+            // Auto-selects "All" at index 0 so it highlights on boot
+            filterList.SelectedIndex = 0; 
+        }
+    }
+
+    private async Task LoadGtfoBinsAsync()
+    {
+        if (GtfoBinsStatusTxt != null)
+            GtfoBinsStatusTxt.Text = "loading…";
+
+        try
+        {
+            var uri = new Uri("avares://KoalaNotes/Assets/gtfobins.json");
+            using var stream = Avalonia.Platform.AssetLoader.Open(uri);
+            using var reader = new System.IO.StreamReader(stream);
+            string json = await reader.ReadToEndAsync();
+
+            // 🚀 FIX: Push the heavy parsing logic onto a background CPU thread
+            _gtfoBinsData = await Task.Run(() => ParseGtfoBins(json));
+            _gtfoBinsLoaded = true;
+
+            if (GtfoBinsStatusTxt != null)
+                GtfoBinsStatusTxt.Text = $"{_gtfoBinsData.Count} binaries";
+
+            // Generate the categories from the data dynamically
+            PopulateDynamicCategories();
+
+            ApplyGtfoBinsFilter();
+        }
+        catch (Exception ex)
+        {
+            if (GtfoBinsStatusTxt != null)
+                GtfoBinsStatusTxt.Text = "load failed";
+            RenderGtfoBinsError(ex.Message);
+        }
+    }
+
+    // ── JSON parser ───────────────────────────────────────────────────────────────
+    // GTFOBins api.json structure:
+    //   { "binary-name": { "functions": { "shell": [...], "sudo": [...], ... } }, ... }
+    
+    private static List<GtfoBinsEntry> ParseGtfoBins(string json)
+    {
+        var entries = new List<GtfoBinsEntry>();
+        using var doc = JsonDocument.Parse(json);
+    
+        if (!doc.RootElement.TryGetProperty("executables", out var executables))
+            throw new Exception("Unexpected JSON format: missing 'executables' key.");
+    
+        foreach (var binaryProp in executables.EnumerateObject())
+        {
+            var entry = new GtfoBinsEntry { Name = binaryProp.Name };
+    
+            if (binaryProp.Value.TryGetProperty("functions", out var functions))
+            {
+                foreach (var funcTypeProp in functions.EnumerateObject())
+                {
+                    string typeName = funcTypeProp.Name;
+    
+                    foreach (var item in funcTypeProp.Value.EnumerateArray())
+                    {
+                        string code    = item.TryGetProperty("code",    out var c) ? c.GetString() ?? "" : "";
+                        string comment = item.TryGetProperty("comment", out var m) ? m.GetString() ?? "" : "";
+    
+                        // Collect context labels (sudo, suid, unprivileged, capabilities…)
+                        var contexts = new List<string>();
+                        if (item.TryGetProperty("contexts", out var ctxEl))
+                            foreach (var ctx in ctxEl.EnumerateObject())
+                                contexts.Add(ctx.Name);
+    
+                        if (!string.IsNullOrWhiteSpace(code))
+                            entry.Functions.Add(new GtfoBinsFunction
+                            {
+                                Type     = typeName,
+                                Code     = code.Trim(),
+                                Comment  = comment.Trim(),
+                                Contexts = contexts,
+                            });
+                    }
+                }
+            }
+    
+            if (entry.Functions.Count > 0)
+                entries.Add(entry);
+        }
+    
+        return entries.OrderBy(e => e.Name).ToList();
+    }    
+    
+    // ══════════════════════════════════════════════════════════════════════════════
+    // GTFOBins — filtering
+    // ══════════════════════════════════════════════════════════════════════════════
+    
+    private void ApplyGtfoBinsFilter()
+    {
+        string search = _gtfoBinsSearch.Trim().ToLowerInvariant();
+        string type   = _gtfoBinsTypeFilter;
+
+        _gtfoBinsFiltered = _gtfoBinsData
+            .Where(e =>
+            {
+                // 1. Check if the binary name matches the search query
+                bool matchesName = string.IsNullOrEmpty(search) || e.Name.Contains(search);
+
+                // 2. Check if any payload/exploit category text matches the search query
+                bool matchesPayloadType = false;
+                if (!string.IsNullOrEmpty(search) && e.Functions != null)
+                {
+                    matchesPayloadType = e.Functions.Any(f => 
+                        f.Type.Contains(search) || 
+                        // Smart aliases mapping standard cybersecurity terms to GTFOBins tags:
+                        (search == "privesc" && (f.Type == "sudo" || f.Type == "suid" || f.Type == "capabilities")) ||
+                        (search == "read" && (f.Type == "file-read" || f.Type == "limited-file-read")) ||
+                        (search == "write" && (f.Type == "file-write" || f.Type == "limited-file-write")) ||
+                        (search == "shell" && (f.Type == "shell" || f.Type == "reverse-shell" || f.Type == "bind-shell"))
+                    );
+                }
+
+                // 3. Keep the item if it satisfies the structural Category Chip Filter (All, Sudo, etc.)
+                bool matchesCategoryChip = type == "all" || (e.Functions != null && e.Functions.Any(f => f.Type == type));
+
+                // Return true if it matches either name OR payload keyword, AND respects the current tab chip
+                return (matchesName || matchesPayloadType) && matchesCategoryChip;
+            })
+            .ToList();
+
+        if (GtfoBinsStatusTxt != null && _gtfoBinsLoaded)
+            GtfoBinsStatusTxt.Text = $"{_gtfoBinsFiltered.Count} / {_gtfoBinsData.Count} binaries";
+
+        RenderGtfoBinsResults();
+    }
+
+    
+    // ══════════════════════════════════════════════════════════════════════════════
+    // GTFOBins — rendering
+    // ══════════════════════════════════════════════════════════════════════════════
+    
+    private void RenderGtfoBinsResults()
+    {
+        if (GtfoBinsResultsPanel == null) return;
+        GtfoBinsResultsPanel.Children.Clear();
+
+        if (!_gtfoBinsLoaded)
+            return;
+
+        if (_gtfoBinsFiltered.Count == 0)
+        {
+            GtfoBinsResultsPanel.Children.Add(new TextBlock
+            {
+                Text         = "No matching binaries found.",
+                Foreground   = new SolidColorBrush(Color.Parse("#6e7681")),
+                FontSize     = 13,
+                Margin       = new Thickness(0, 20, 0, 0),
+            });
+            return;
+        }
+
+        string typeFilter = _gtfoBinsTypeFilter;
+
+        // 🚀 OPTIMIZATION: Limit initial rendering to the top 25 matches 
+        // This stops the UI from freezing when switching filters or clearing searches!
+        var itemsToRender = _gtfoBinsFiltered.Take(25).ToList();
+
+        foreach (var entry in itemsToRender)
+        {
+            var funcsToShow = typeFilter == "all"
+                ? entry.Functions
+                : entry.Functions.Where(f => f.Type == typeFilter).ToList();
+
+            if (funcsToShow.Count == 0) continue;
+
+            // ── Outer card ──────────────────────────────────────────────────────
+            var card = new Border
+            {
+                Background      = new SolidColorBrush(Color.Parse("#161b22")),
+                BorderBrush     = new SolidColorBrush(Color.Parse("#30363d")),
+                BorderThickness = new Thickness(1),
+                CornerRadius    = new CornerRadius(6),
+                Margin          = new Thickness(0, 0, 0, 6),
+            };
+
+            var cardStack = new StackPanel();
+
+            // ── Collapsible header ───────────────────────────────────────────────
+            var header = new Button
+            {
+                Background  = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding     = new Thickness(16, 12),
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+            };
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions = new ColumnDefinitions("*, Auto");
+
+            // Left: binary name + type badges
+            var headerLeft = new WrapPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+            headerLeft.Children.Add(new TextBlock
+            {
+                Text       = entry.Name,
+                FontSize   = 14,
+                FontWeight = FontWeight.Bold,
+                Foreground = new SolidColorBrush(Color.Parse("#e6edf3")),
+                Margin     = new Thickness(0, 0, 10, 0),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            });
+
+            foreach (string t in funcsToShow.Select(f => f.Type).Distinct())
+            {
+                headerLeft.Children.Add(new Border
+                {
+                    Background      = new SolidColorBrush(Color.Parse("#21262d")),
+                    BorderBrush     = new SolidColorBrush(Color.Parse("#3d3680")),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius    = new CornerRadius(4),
+                    Padding         = new Thickness(7, 2),
+                    Margin          = new Thickness(0, 0, 5, 0),
+                    Child           = new TextBlock
+                    {
+                        Text       = t,
+                        FontSize   = 10,
+                        Foreground = new SolidColorBrush(Color.Parse("#7c6bff")),
+                        VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    },
+                });
+            }
+
+            Grid.SetColumn(headerLeft, 0);
+            headerGrid.Children.Add(headerLeft);
+
+            // Right: chevron indicator
+            var chevron = new TextBlock
+            {
+                Text       = "▶",
+                Foreground = new SolidColorBrush(Color.Parse("#6e7681")),
+                FontSize   = 10,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            Grid.SetColumn(chevron, 1);
+            headerGrid.Children.Add(chevron);
+
+            header.Content = headerGrid;
+            cardStack.Children.Add(header);
+
+            // ── Expandable body ──────────────────────────────────────────────────
+            var body = new StackPanel
+            {
+                IsVisible = false,
+                Spacing   = 0,
+            };
+
+            // Separator line
+            body.Children.Add(new Border
+            {
+                Height     = 1,
+                Background = new SolidColorBrush(Color.Parse("#30363d")),
+            });
+
+            for (int i = 0; i < funcsToShow.Count; i++)
+            {
+                var func      = funcsToShow[i];
+                var funcBlock = new StackPanel { Spacing = 6, Margin = new Thickness(16, 12, 16, 12) };
+
+                // Function type label + context badges
+                var funcHeader = new WrapPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
+                funcHeader.Children.Add(new TextBlock
+                {
+                    Text       = func.Type.ToUpperInvariant(),
+                    FontSize   = 10,
+                    FontWeight = FontWeight.Bold,
+                    Foreground = new SolidColorBrush(Color.Parse("#7c6bff")),
+                    Margin     = new Thickness(0, 0, 8, 0),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    
+                });
+
+                foreach (string ctx in func.Contexts)
+                {
+                    string ctxColor = ctx switch
+                    {
+                        "sudo"          => "#f0883e",
+                        "suid"          => "#f85149",
+                        "capabilities"  => "#d2a8ff",
+                        _               => "#8b949e",
+                    };
+                    funcHeader.Children.Add(new Border
+                    {
+                        Background      = new SolidColorBrush(Color.Parse("#21262d")),
+                        BorderBrush     = new SolidColorBrush(Color.Parse(ctxColor)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius    = new CornerRadius(3),
+                        Padding         = new Thickness(6, 1),
+                        Margin          = new Thickness(0, 0, 4, 0),
+                        Child           = new TextBlock
+                        {
+                            Text       = ctx,
+                            FontSize   = 9,
+                            Foreground = new SolidColorBrush(Color.Parse(ctxColor)),
+                            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                        },
+                    });
+                }
+
+                funcBlock.Children.Add(funcHeader);
+
+                // Comment / description
+                if (!string.IsNullOrWhiteSpace(func.Comment))
+                {
+                    funcBlock.Children.Add(new TextBlock
+                    {
+                        Text         = func.Comment,
+                        FontSize     = 11,
+                        Foreground   = new SolidColorBrush(Color.Parse("#8b949e")),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+
+                // Code block + copy button row
+                var codeRow = new Grid();
+                codeRow.ColumnDefinitions = new ColumnDefinitions("*, Auto");
+
+                var codeBox = new TextBox
+                {
+                    Text            = func.Code,
+                    IsReadOnly      = true,
+                    AcceptsReturn   = true,
+                    TextWrapping    = TextWrapping.Wrap,
+                    Background      = new SolidColorBrush(Color.Parse("#0d1117")),
+                    BorderBrush     = new SolidColorBrush(Color.Parse("#30363d")),
+                    BorderThickness = new Thickness(1),
+                    Padding         = new Thickness(10, 8),
+                    FontFamily      = new Avalonia.Media.FontFamily("Courier New"),
+                    FontSize        = 12,
+                    Foreground      = new SolidColorBrush(Color.Parse("#e6edf3"))
+                };
+                Grid.SetColumn(codeBox, 0);
+                codeRow.Children.Add(codeBox);
+
+                // Copy to Clipboard Button
+                var copyBtn = new Button
+                {
+                    Content         = "Copy",
+                    Margin          = new Thickness(8, 0, 0, 0),
+                    Padding         = new Thickness(12, 6),
+                    Background      = new SolidColorBrush(Color.Parse("#21262d")),
+                    BorderBrush     = new SolidColorBrush(Color.Parse("#30363d")),
+                    BorderThickness = new Thickness(1),
+                    Foreground      = new SolidColorBrush(Color.Parse("#c9d1d9")),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
+                };
+                
+                // Wire up the clipboard operation
+                copyBtn.Click += async (s, e) => {
+                    var topLevel = Avalonia.Controls.TopLevel.GetTopLevel(this);
+                    if (topLevel?.Clipboard != null)
+                    {
+                        await topLevel.Clipboard.SetTextAsync(func.Code);
+                        copyBtn.Content = "Copied!";
+                        await Task.Delay(1500);
+                        copyBtn.Content = "Copy";
+                    }
+                };
+                
+                Grid.SetColumn(copyBtn, 1);
+                codeRow.Children.Add(copyBtn);
+                funcBlock.Children.Add(codeRow);
+
+                body.Children.Add(funcBlock);
+
+                // Add thin separator line between functions
+                if (i < funcsToShow.Count - 1)
+                {
+                    body.Children.Add(new Border
+                    {
+                        Height     = 1,
+                        Background = new SolidColorBrush(Color.Parse("#21262d")),
+                        Margin     = new Thickness(16, 0, 16, 0)
+                    });
+                }
+            }
+
+            cardStack.Children.Add(body);
+            card.Child = cardStack;
+
+            // Click handler to toggle expansion
+            header.Click += (s, e) => {
+                body.IsVisible = !body.IsVisible;
+                chevron.Text = body.IsVisible ? "▼" : "▶";
+            };
+
+            GtfoBinsResultsPanel.Children.Add(card);
+        }
+    }
+
+
+    private void RenderGtfoBinsError(string msg)
+    {
+        if (GtfoBinsResultsPanel == null) return;
+        GtfoBinsResultsPanel.Children.Clear();
+        GtfoBinsResultsPanel.Children.Add(new TextBox
+        {
+            Text            = $"Failed to load GTFOBins data:\n{msg}\n\nPlace gtfobins.json in your Assets folder and ensure it is listed as an AvaloniaResource in the .csproj, then click ↻ refresh.",
+            Foreground      = new SolidColorBrush(Color.Parse("#f85149")),
+            Background      = new SolidColorBrush(Color.Parse("#161b22")),
+            BorderThickness = new Thickness(0),
+            FontSize        = 12,
+            IsReadOnly      = true,
+            TextWrapping    = TextWrapping.Wrap,
+            Margin          = new Thickness(0, 12, 0, 0),
+        });
+    }
+    
+    // ══════════════════════════════════════════════════════════════════════════════
+    // GTFOBins — event handlers
+    // ══════════════════════════════════════════════════════════════════════════════
+    
+    private async void OnGtfoBinsSearchChanged(object sender, Avalonia.Controls.TextChangedEventArgs e)
+    {
+        // 1. Get the current text input safely
+        _gtfoBinsSearch = (sender as Avalonia.Controls.TextBox)?.Text ?? "";
+
+        if (!_gtfoBinsLoaded) return;
+
+        // 2. Cancel the previous keystroke's timer if it's still waiting
+        _searchCancellationTokenSource?.Cancel();
+        _searchCancellationTokenSource = new System.Threading.CancellationTokenSource();
+        var token = _searchCancellationTokenSource.Token;
+
+        try
+        {
+            // 3. Wait for 250ms of silence (user paused typing)
+            await Task.Delay(250, token);
+
+            // 4. Run the filter only if the user didn't hit another key
+            if (!token.IsCancellationRequested)
+            {
+                ApplyGtfoBinsFilter();
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // Smoothly ignore tasks that were cancelled by a newer keystroke
+        }
+    }
+
+    
+    private void OnGtfoBinsSelectionFilterChanged(object? sender, Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        var filterList = sender as Avalonia.Controls.ListBox;
+        if (filterList != null && filterList.SelectedItem is string selectedCategory)
+        {
+            // Convert to lowercase to perfectly match your filter logic (e.g., "All" -> "all")
+            _gtfoBinsTypeFilter = selectedCategory.Trim().ToLowerInvariant();
+            
+            ApplyGtfoBinsFilter();
+        }
+    }
+    
+    private void OnGtfoBinsRefresh(object sender, RoutedEventArgs e)
+    {
+        _gtfoBinsLoaded = false;
+        _gtfoBinsData.Clear();
+        _gtfoBinsFiltered.Clear();
+        if (GtfoBinsResultsPanel != null) GtfoBinsResultsPanel.Children.Clear();
+        _ = LoadGtfoBinsAsync();
+    }
+
+    private void OnGtfoBinsSearchKeyDown(object sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key == Avalonia.Input.Key.Enter)
+        {
+            if (!_gtfoBinsLoaded)
+                _ = LoadGtfoBinsAsync();
+            else
+                ApplyGtfoBinsFilter();
+        }
+    }
 }
+
 // ── Supporting model classes ───────────────────────────────────────────────
 
 public class ShellBlueprint
@@ -2090,4 +2617,30 @@ public class SqliPayloadVm
     public string Category { get; set; } = "";
     public string Payload  { get; set; } = "";
     public string FullUrl  { get; set; } = "";
+}
+
+public class GtfoBinsEntry
+{
+    public string Name { get; set; } = "";
+    public List<GtfoBinsFunction> Functions { get; set; } = new();
+}
+ 
+public class GtfoBinsFunction
+{
+    public string       Type     { get; set; } = "";
+    public string       Code     { get; set; } = "";
+    public string       Comment  { get; set; } = "";
+    public List<string> Contexts { get; set; } = new();
+}
+
+public class GtfobinsData
+{
+    // We only care about the "executables" object inside the JSON file
+    public Dictionary<string, BinaryInfo> Executables { get; set; } = new();
+}
+
+public class BinaryInfo
+{
+    // Maps category strings (e.g., "sudo") to lists of exploit command objects
+    public Dictionary<string, List<object>> Functions { get; set; } = new();
 }

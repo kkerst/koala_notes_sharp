@@ -26,5 +26,6 @@
     <PackageReference Include="Mapsui.Avalonia" Version="4.1.8" />
     <None Remove="Assets\koala.ico" />
     <AvaloniaResource Include="Assets\koala.ico" />
+    <AvaloniaResource Include="Assets\gtfobins.json"/>
   </ItemGroup>
 </Project>

@@ -18,6 +18,7 @@
                         <ComboBoxItem Content="- Tool Selection -" Tag="toolselection"/>
                         <ComboBoxItem Content="Encoder Module" Tag="encoder"/>
                         <ComboBoxItem Content="Exploit Database" Tag="exploit"/>
+                        <ComboBoxItem Content="GTFOBins" Tag="gtfobins"/>
                         <ComboBoxItem Content="HTTP Repeater" Tag="repeater"/>
                         <ComboBoxItem Content="IP Geolocation" Tag="ip"/>
                         <ComboBoxItem Content="Notes Workspace" Tag="notes"/>
@@ -669,6 +670,88 @@
                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
                             </Grid>
                         </Grid>
+                    </Grid>
+
+                    <!-- GTFOBINS PANEL -->
+                    <Grid Name="ViewGtfobinsPanel" IsVisible="False" RowDefinitions="Auto, Auto, *">
+
+                        <!-- Header / search bar -->
+                        <Border Grid.Row="0" Background="#161b22" BorderBrush="#30363d"
+                                BorderThickness="0,0,0,1" Padding="24,16">
+                            <Grid RowDefinitions="Auto, Auto">
+                                <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                                    <TextBlock Text="GTFOBins" Foreground="#7c6bff"
+                                            FontSize="18" FontWeight="Bold"/>
+                                    <TextBlock Text="Unix binary privilege escalation and living-off-the-land reference."
+                                            Foreground="#6e7681" FontSize="12"/>
+                                </StackPanel>
+                                <Grid Grid.Row="1" ColumnDefinitions="*, Auto">
+                                    <TextBox Grid.Column="0"
+                                            Name="GtfoBinsSearchBox"
+                                            Watermark="Search binary (e.g. vim, python, tar)..."
+                                            TextChanged="OnGtfoBinsSearchChanged"
+                                            KeyDown="OnGtfoBinsSearchKeyDown"
+                                            Background="#21262d" BorderBrush="#30363d"
+                                            Foreground="#e6edf3" Padding="10,8"
+                                            Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="1"
+                                            Name="GtfoBinsStatusTxt"
+                                            Text="not loaded"
+                                            Foreground="#6e7681" FontSize="11"
+                                            VerticalAlignment="Center"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Function-type filter chips -->
+                        <Border Grid.Row="1" Background="#0d1117" BorderBrush="#30363d"
+                                BorderThickness="0,0,0,1" Padding="24,10">
+                            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="filter:" Foreground="#6e7681" FontSize="11"
+                                        VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <ListBox Name="GtfoBinsFilterList"
+                                        SelectionChanged="OnGtfoBinsSelectionFilterChanged"
+                                        Background="Transparent" BorderThickness="0"
+                                        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                    <ListBox.Styles>
+                                        <Style Selector="ListBoxItem">
+                                            <Setter Property="Padding" Value="12,4"/>
+                                            <Setter Property="Margin" Value="0,0,6,0"/>
+                                            <Setter Property="FontSize" Value="11"/>
+                                            <Setter Property="BorderThickness" Value="1"/>
+                                            <Setter Property="BorderBrush" Value="#30363d"/>
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Foreground" Value="#8b949e"/>
+                                            <Setter Property="CornerRadius" Value="4"/>
+                                        </Style>
+                                        <Style Selector="ListBoxItem:selected">
+                                            <Setter Property="Background" Value="#21262d"/>
+                                            <Setter Property="Foreground" Value="#7c6bff"/>
+                                            <Setter Property="BorderBrush" Value="#7c6bff"/>
+                                        </Style>
+                                    </ListBox.Styles>
+                                    
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <!-- Displays the string text cleanly inside the ListBoxItem container -->
+                                            <TextBlock Text="{Binding}" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                            </WrapPanel>
+                        </Border>
+
+                        <!-- Results list -->
+                        <ScrollViewer Grid.Row="2"
+                                    VerticalScrollBarVisibility="Auto"
+                                    HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Name="GtfoBinsResultsPanel"
+                                        Spacing="12" Margin="24,16"/>
+                        </ScrollViewer>
                     </Grid>
 
                 </Grid>
