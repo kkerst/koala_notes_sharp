@@ -2247,7 +2247,8 @@ public partial class MainWindow : Window
 
         // 🚀 OPTIMIZATION: Limit initial rendering to the top 25 matches 
         // This stops the UI from freezing when switching filters or clearing searches!
-        var itemsToRender = _gtfoBinsFiltered.Take(25).ToList();
+        //var itemsToRender = _gtfoBinsFiltered.Take(25).ToList();
+        var itemsToRender = _gtfoBinsFiltered.ToList(); // render everything
 
         foreach (var entry in itemsToRender)
         {
